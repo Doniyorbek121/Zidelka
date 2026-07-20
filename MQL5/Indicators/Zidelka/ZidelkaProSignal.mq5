@@ -7,15 +7,15 @@
 //+------------------------------------------------------------------+
 #property copyright   "Zidelka"
 #property link        "https://github.com/Doniyorbek121/Zidelka"
-#property version     "1.30"
+#property version     "1.40"
 #property description "Professional konfluensiyaga asoslangan signal indikatori."
 #property description "Supertrend + EMA + RSI + MTF + likvidlik zonalari (SMC)."
-#property description "Zona bahosi (0-10), fill/sweep statistikasi, net-pull bosim paneli."
+#property description "Zona bahosi (0-10), statistika, net-pull bosim (panel + histogram)."
 #property strict
 
 //--- Indikator sozlamalari
 #property indicator_chart_window
-#property indicator_buffers 6
+#property indicator_buffers 7
 #property indicator_plots   4
 
 //--- Plot 1: Supertrend chizig'i (pastdan, ko'tarilish trendi)
@@ -121,6 +121,7 @@ double BuyArrowBuffer[];    // BUY o'qlari
 double SellArrowBuffer[];   // SELL o'qlari
 double SupertrendBuffer[];  // Yagona Supertrend qiymati (ichki)
 double DirBuffer[];         // Yo'nalish: +1 (up), -1 (down) (ichki)
+double PullBuffer[];        // Net pull bias har bar (kompanion histogram uchun)
 
 //--- Indikator handle'lari
 int    hATR      = INVALID_HANDLE;
@@ -186,6 +187,7 @@ int OnInit()
    SetIndexBuffer(3, SellArrowBuffer,  INDICATOR_DATA);
    SetIndexBuffer(4, SupertrendBuffer, INDICATOR_CALCULATIONS);
    SetIndexBuffer(5, DirBuffer,        INDICATOR_CALCULATIONS);
+   SetIndexBuffer(6, PullBuffer,       INDICATOR_CALCULATIONS);
 
    //--- o'q kodlari (Wingdings): 233 yuqoriga, 234 pastga
    PlotIndexSetInteger(2, PLOT_ARROW, 233);
@@ -203,6 +205,7 @@ int OnInit()
    ArraySetAsSeries(SellArrowBuffer,  false);
    ArraySetAsSeries(SupertrendBuffer, false);
    ArraySetAsSeries(DirBuffer,        false);
+   ArraySetAsSeries(PullBuffer,       false);
 
    //--- Point/Digits sozlash (5/3 xonali kotirovkalar uchun pips)
    g_point = _Point;
@@ -411,6 +414,14 @@ void ScanZones(int rates_total, const datetime &time[], const double &high[],
                if(AddZone(time[p], low[p], low[p] - poolH, -1, 1, p, (double)tickvol[p])) g_poolTot++;
            }
         }
+
+      //--- 4) shu bar uchun net pull bias (repaint qilmaydi — o'sha paytdagi
+      //--- zonalar bo'yicha hisoblanadi) -> kompanion histogram uchun buferga
+      int vs = MathMax(b - VolBaseLen + 1, 0);
+      long vsum = 0;
+      for(int k = vs; k <= b; k++) vsum += tickvol[k];
+      g_volBase = (b - vs + 1 > 0) ? (double)vsum / (b - vs + 1) : 0.0;
+      PullBuffer[b] = ComputePullBias(close[b], atr[b]);
      }
 
    g_zoneScanIdx = rates_total - 1;   // keyingi yopiladigan bardan davom etamiz
@@ -465,6 +476,30 @@ double ScoreZone(const SZone &z, double price, double atrVal)
   }
 
 //+------------------------------------------------------------------+
+//| Net pull bias hisoblash (berilgan narx/ATR/joriy zonalar bo'yicha)|
+//| Qaytaradi -100..+100; g_massUp/g_massDn ni ham yangilaydi.        |
+//| Eslatma: g_volBase joriy holatga o'rnatilgan bo'lishi kerak.      |
+//+------------------------------------------------------------------+
+double ComputePullBias(double price, double atrVal)
+  {
+   double mu = 0.0, md = 0.0;
+   for(int i = 0; i < ArraySize(g_zones); i++)
+     {
+      double sc   = ScoreZone(g_zones[i], price, atrVal);
+      double volK = (g_volBase > 0) ? g_zones[i].vol / g_volBase : 0.0;
+      double w    = sc * (1.0 + MathLog(1.0 + volK));
+      double mid  = (g_zones[i].top + g_zones[i].bot) / 2.0;
+      if(mid > price) mu += w;   // narx ustidagi likvidlik yuqoriga tortadi
+      else            md += w;   // narx ostidagi likvidlik pastga tortadi
+     }
+   g_massUp = mu;
+   g_massDn = md;
+   double tot = mu + md;
+   double su  = (tot > 0) ? mu / tot : 0.5;
+   return((su - 0.5) * 200.0);
+  }
+
+//+------------------------------------------------------------------+
 //| Zonalarni chizish, baholash va eng yaqin zonalarni hisoblash     |
 //+------------------------------------------------------------------+
 void DrawZones(double price, double atrVal)
@@ -472,8 +507,6 @@ void DrawZones(double price, double atrVal)
    g_nearDemand = 0.0;
    g_nearSupply = 0.0;
    g_topScore   = 0.0;
-   g_massUp     = 0.0;
-   g_massDn     = 0.0;
    double bestDem = 0.0, bestSup = 0.0;
 
    for(int i = 0; i < ArraySize(g_zones); i++)
@@ -482,13 +515,6 @@ void DrawZones(double price, double atrVal)
       g_zones[i].score = ScoreZone(g_zones[i], price, atrVal);
       SZone z = g_zones[i];
       if(z.score > g_topScore) g_topScore = z.score;
-
-      //--- net pull massasi: ball × (1 + log(1 + hajm/baza))
-      double volK = (g_volBase > 0) ? z.vol / g_volBase : 0.0;
-      double w    = z.score * (1.0 + MathLog(1.0 + volK));
-      double mid  = (z.top + z.bot) / 2.0;
-      if(mid > price) g_massUp += w;   // narx ustidagi likvidlik yuqoriga tortadi
-      else            g_massDn += w;   // narx ostidagi likvidlik pastga tortadi
 
       string nm = ZoneName(z);
       color  c  = (z.type < 0) ? DemandColor : SupplyColor;
@@ -548,11 +574,6 @@ void DrawZones(double price, double atrVal)
 
    g_nearDemand = bestDem;
    g_nearSupply = bestSup;
-
-   //--- net pull bias: -100 (pastga) .. +100 (yuqoriga)
-   double massTot = g_massUp + g_massDn;
-   double shareUp = (massTot > 0) ? g_massUp / massTot : 0.5;
-   g_pullBias = (shareUp - 0.5) * 200.0;
   }
 
 //+------------------------------------------------------------------+
@@ -633,6 +654,7 @@ int OnCalculate(const int rates_total,
      {
       start = ATR_Period + 1;
       g_zoneScanIdx = -1;   // to'liq qayta hisoblashda zonalar tiklanadi
+      ArrayInitialize(PullBuffer, 0.0);
       //--- boshlang'ich holatni tozalash
       for(int i = 0; i < start; i++)
         {
@@ -726,6 +748,15 @@ int OnCalculate(const int rates_total,
       g_volBase = (vlen > 0) ? (double)vsum / vlen : 0.0;
 
       DrawZones(close[rates_total-1], atr[rates_total-1]);
+
+      //--- jonli bar uchun net pull (dashboard + kompanion histogram)
+      g_pullBias = ComputePullBias(close[rates_total-1], atr[rates_total-1]);
+      PullBuffer[rates_total-1] = g_pullBias;
+     }
+   else
+     {
+      g_pullBias = 0.0;
+      PullBuffer[rates_total-1] = 0.0;
      }
 
    //--- alertlar: faqat yopilgan oxirgi barda

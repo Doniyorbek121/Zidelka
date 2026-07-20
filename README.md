@@ -68,6 +68,25 @@ narxdan yuqori va quyi taqsimlab, bozor qay tomonga "tortilayotganini" ko'rsatad
 > Bu bosim yo'nalishi trend signaliga qo'shimcha kontekst beradi: masalan, BUY
 > signalida yuqoriga kuchli pull bo'lsa — harakat uchun ko'proq "joy" bor demakdir.
 
+### Off-chart bosim histogrami (kompanion indikator)
+
+`MQL5/Indicators/Zidelka/ZidelkaProPressure.mq5` — net-pull bosimini **alohida
+oynada (subwindow)** histogram sifatida ko'rsatuvchi kompanion indikator:
+
+- 🟥 **Musbat (yuqoriga)** ustunlar — likvidlik narxni yuqoriga tortmoqda
+- 🟩 **Manfiy (pastga)** ustunlar — likvidlik narxni pastga tortmoqda
+- Bosimning **vaqt bo'yicha o'zgarishini** kuzatish imkonini beradi (−100…+100)
+
+Kompanion asosiy indikatorni `iCustom` orqali o'qiydi (ekranga hech narsa
+chizmaydi, faqat hisoblaydi). Histogram **qayta chizmaydi** — har bar o'sha
+paytdagi zonalar bo'yicha hisoblanadi.
+
+**O'rnatish:** `ZidelkaProPressure.mq5` ni `MQL5/Indicators/Zidelka/` ga qo'ying,
+**F7** bilan kompilyatsiya qiling, grafikning **pastki oynasiga** tashlang.
+
+> ⚠️ Kompanion parametrlari (zona/scoring) grafikdagi asosiy indikator bilan
+> bir xil bo'lishi kerak — standart qiymatlar allaqachon mos keladi.
+
 ## Xususiyatlari
 
 - 🎯 Supertrend asosidagi rangli trend chizig'i (ko'k = ko'tarilish, qizil = tushish)
@@ -76,6 +95,7 @@ narxdan yuqori va quyi taqsimlab, bozor qay tomonga "tortilayotganini" ko'rsatad
 - ⭐ **Zona bahosi (0–10)**: hajm bosimi + o'lcham + testlar + yaqinlik bo'yicha vaznli scoring
 - 📈 **Statistika**: FVG fill rate, pool sweep rate, o'rtacha hal bo'lish vaqti
 - ⚖️ **Net Pull bosim paneli**: bozor qay tomonga tortilyapti (grafik gauge + tug-of-war)
+- 📉 **Off-chart bosim histogrami**: alohida oynada bosim tarixi (kompanion indikator)
 - 📊 Grafik ustidagi jonli **dashboard**: trend, RSI, MTF, zonalar, top ball, fill/sweep, bosim
 - 🔔 To'liq alertlar: ekran, mobil push, email, ovoz
 - ⚙️ Har bir filtrni alohida yoqish/o'chirish imkoniyati
