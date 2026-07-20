@@ -36,12 +36,32 @@ Ixtiyoriy **`UseLiquidityFilter`** parametri yoqilsa, signal faqat mos zona
 yaqinida (masalan, BUY uchun pastda demand zonasi bor bo'lsa) tasdiqlanadi —
 bu signal sifatini yanada oshiradi.
 
+### Zona bahosi (Scoring 0–10) va statistika
+
+Har bir zona **0–10 ball** bilan baholanadi (vaznli formula):
+
+| Komponent | Nimani o'lchaydi |
+|-----------|------------------|
+| **Hajm bosimi** | Zona shakllangandagi hajm / bazaviy hajm |
+| **O'lcham** | Zona balandligi / ATR |
+| **Testlar** | Zona necha marta sinovdan o'tgan |
+| **Yaqinlik** | Zonaning joriy narxga yaqinligi |
+
+Ball ≥ 8.0 bo'lsa zona **ELITE** (★★★★) deb belgilanadi va yorqinroq chiziladi.
+Har bir zona yorlig'ida `▲FVG ★★★ 7.2 ·2T` ko'rinishida ball va test soni chiqadi.
+
+**Statistika** dashboardda kuzatiladi: **FVG fill rate** (bo'shliqlar necha % to'ldi),
+**pool sweep rate** (stop-pool'lar necha % supurildi) va o'rtacha hal bo'lish vaqti (bar).
+Bu — indikatorning shu bozordagi tarixiy ishonchliligini ko'rsatuvchi ko'zgu.
+
 ## Xususiyatlari
 
 - 🎯 Supertrend asosidagi rangli trend chizig'i (ko'k = ko'tarilish, qizil = tushish)
 - 🟢🔴 Grafikda BUY/SELL o'qlari (native buferlar, Data Window'da ko'rinadi)
 - 🟩🟥 **Likvidlik zonalari**: FVG imbalance + stop-pool (SMC) — konfluensiya va ixtiyoriy filtr
-- 📊 Grafik ustidagi jonli **dashboard**: trend, RSI, MTF, zonalar, eng yaqin demand/supply
+- ⭐ **Zona bahosi (0–10)**: hajm bosimi + o'lcham + testlar + yaqinlik bo'yicha vaznli scoring
+- 📈 **Statistika**: FVG fill rate, pool sweep rate, o'rtacha hal bo'lish vaqti
+- 📊 Grafik ustidagi jonli **dashboard**: trend, RSI, MTF, zonalar, top ball, fill/sweep rate
 - 🔔 To'liq alertlar: ekran, mobil push, email, ovoz
 - ⚙️ Har bir filtrni alohida yoqish/o'chirish imkoniyati
 - 📱 5/3 xonali kotirovkalar uchun avtomatik pips hisoblash

@@ -7,10 +7,10 @@
 //+------------------------------------------------------------------+
 #property copyright   "Zidelka"
 #property link        "https://github.com/Doniyorbek121/Zidelka"
-#property version     "1.10"
+#property version     "1.20"
 #property description "Professional konfluensiyaga asoslangan signal indikatori."
 #property description "Supertrend + EMA + RSI + MTF + likvidlik zonalari (SMC)."
-#property description "BUY/SELL o'qlari, FVG/stop-pool zonalari, dashboard va alertlar."
+#property description "Zona bahosi (0-10), fill/sweep statistikasi, dashboard va alertlar."
 #property strict
 
 //--- Indikator sozlamalari
@@ -95,6 +95,20 @@ input color              DemandColor     = clrSeaGreen;  // Talab (demand) zonas
 input color              SupplyColor     = clrFireBrick; // Taklif (supply) zonasi
 input int                ZoneTransp      = 85;           // Zona shaffofligi (60-95)
 
+//--- Scoring/statistika parametrlari (faqat tahliliy — signalga ta'sir qilmaydi)
+input group "=== Zona bahosi (Scoring 0-10) ==="
+input bool               ShowZoneScore   = true;         // Zona bahosini yorliqda ko'rsatish
+input double             EliteThreshold  = 8.0;          // Elite (kuchli) zona chegarasi
+input int                VolBaseLen      = 50;           // Hajm bazaviy chizig'i (bar)
+input double             ScoreSizeNorm   = 1.20;         // To'liq o'lcham bahosi uchun balandlik (ATR)
+input double             ScoreVolNorm    = 1.40;         // To'liq hajm bahosi uchun hajm (× baza)
+input double             ScoreTestNorm   = 3.0;          // To'liq test bahosi uchun testlar
+input double             ScoreProxNorm   = 6.0;          // Yaqinlik oralig'i (ATR)
+input double             WeightVol       = 0.30;         // Og'irlik: hajm bosimi
+input double             WeightSize      = 0.25;         // Og'irlik: zona o'lchami
+input double             WeightTest      = 0.20;         // Og'irlik: testlar
+input double             WeightProx      = 0.25;         // Og'irlik: yaqinlik
+
 //+------------------------------------------------------------------+
 //| Buferlar                                                         |
 //+------------------------------------------------------------------+
@@ -134,12 +148,23 @@ struct SZone
    int      type;        // +1 supply, -1 demand
    int      kind;        // 0 fvg, 1 pool
    bool     mitigated;   // narx tomonidan iste'mol qilinganmi
+   int      bornBar;     // yaratilgan bar indeksi (umr hisobi uchun)
+   double   vol;         // shakllanish hajmi (scoring uchun)
+   int      tests;       // zona necha marta sinovdan o'tgan
+   bool     inside;      // hozir narx zona ichidami (test hisoblash uchun)
+   double   score;       // 0-10 baho
   };
 
 SZone    g_zones[];               // faol zonalar
 int      g_zoneScanIdx = -1;      // keyingi skanerlanadigan yopilgan bar indeksi
 double   g_nearDemand  = 0.0;     // dashboard uchun: eng yaqin talab zonasi
 double   g_nearSupply  = 0.0;     // dashboard uchun: eng yaqin taklif zonasi
+double   g_volBase     = 0.0;     // hajm bazaviy chizig'i (scoring)
+double   g_topScore    = 0.0;     // eng kuchli faol zona bahosi
+
+//--- statistika hisoblagichlari
+int      g_gapTot = 0,  g_gapFilled = 0;   long g_gapBars = 0;
+int      g_poolTot = 0, g_poolSwept = 0;   long g_poolBars = 0;
 
 //+------------------------------------------------------------------+
 //| Initsializatsiya                                                 |
@@ -227,11 +252,25 @@ void OnDeinit(const int reason)
 //| Likvidlik zonalari — funksiyalar                                 |
 //+------------------------------------------------------------------+
 
-//--- zona uchun noyob ob'ekt nomi
+//--- zona uchun noyob ob'ekt nomlari
 string ZoneName(const SZone &z)
   {
    return(ZONE_PREFIX + IntegerToString(z.kind) + "_" +
           IntegerToString(z.type) + "_" + IntegerToString((long)z.t1));
+  }
+string ZoneLabelName(const SZone &z) { return(ZoneName(z) + "_s"); }
+
+//--- zona ob'ektlarini (quti + yorliq) o'chirish
+void ZoneDelete(const SZone &z)
+  {
+   ObjectDelete(0, ZoneName(z));
+   ObjectDelete(0, ZoneLabelName(z));
+  }
+
+//--- yulduzlar bilan baho ko'rsatkichi
+string ScoreStars(double sc)
+  {
+   return(sc >= 8.0 ? "★★★★" : sc >= 6.5 ? "★★★" : sc >= 5.0 ? "★★" : sc >= 3.0 ? "★" : "·");
   }
 
 //--- zona allaqachon mavjudmi (dublikatlarni oldini olish)
@@ -243,16 +282,16 @@ bool ZoneExists(datetime t1, int type, int kind)
    return(false);
   }
 
-//--- yangi zona qo'shish (MaxZones cheklovi bilan)
-void AddZone(datetime t1, double top, double bot, int type, int kind)
+//--- yangi zona qo'shish (MaxZones cheklovi bilan). Qo'shilsa true qaytaradi.
+bool AddZone(datetime t1, double top, double bot, int type, int kind, int bornBar, double vol)
   {
-   if(top <= bot) return;
-   if(ZoneExists(t1, type, kind)) return;
+   if(top <= bot) return(false);
+   if(ZoneExists(t1, type, kind)) return(false);
 
    //--- cheklovga yetganda eng eski zonani olib tashlaymiz
    while(ArraySize(g_zones) >= MaxZones && ArraySize(g_zones) > 0)
      {
-      ObjectDelete(0, ZoneName(g_zones[0]));
+      ZoneDelete(g_zones[0]);
       ArrayRemove(g_zones, 0, 1);
      }
 
@@ -264,13 +303,19 @@ void AddZone(datetime t1, double top, double bot, int type, int kind)
    g_zones[n].type      = type;
    g_zones[n].kind      = kind;
    g_zones[n].mitigated = false;
+   g_zones[n].bornBar   = bornBar;
+   g_zones[n].vol       = vol;
+   g_zones[n].tests     = 0;
+   g_zones[n].inside    = false;
+   g_zones[n].score     = 0.0;
+   return(true);
   }
 
 //--- barcha zona ob'ektlarini va massivni tozalash
 void ClearZones()
   {
    for(int i = 0; i < ArraySize(g_zones); i++)
-      ObjectDelete(0, ZoneName(g_zones[i]));
+      ZoneDelete(g_zones[i]);
    ArrayResize(g_zones, 0);
   }
 
@@ -278,15 +323,18 @@ void ClearZones()
 //| Zonalarni skanerlash (faqat yopilgan barlar, bir marta)          |
 //+------------------------------------------------------------------+
 void ScanZones(int rates_total, const datetime &time[], const double &high[],
-               const double &low[], const double &close[], const double &atr[])
+               const double &low[], const double &close[], const double &atr[],
+               const long &tickvol[])
   {
    int minIdx = ZonePivotLeft + ZonePivotRight + 2;
 
-   //--- to'liq qayta hisoblashda holatni tiklaymiz
+   //--- to'liq qayta hisoblashda holat va statistikani tiklaymiz
    if(g_zoneScanIdx < 0)
      {
       ClearZones();
       g_zoneScanIdx = MathMax(minIdx, rates_total - ZoneLookback);
+      g_gapTot = 0; g_gapFilled = 0; g_gapBars = 0;
+      g_poolTot = 0; g_poolSwept = 0; g_poolBars = 0;
      }
 
    //--- oxirgi YOPILGAN bar rates_total-2 (rates_total-1 hali shakllanmoqda)
@@ -296,23 +344,31 @@ void ScanZones(int rates_total, const datetime &time[], const double &high[],
      {
       if(b < minIdx) continue;
 
-      //--- 1) MITIGATSIYA avval: mavjud zonalarni shu bar iste'mol qildimi.
-      //--- (Aniqlashdan oldin, aks holda yangi FVG o'z barida "mitigated" bo'ladi.)
+      //--- 1) LIFECYCLE avval: testlar va fill/sweep hisobi.
+      //--- (Aniqlashdan oldin, aks holda yangi FVG o'z barida hal bo'ladi.)
       for(int z = ArraySize(g_zones) - 1; z >= 0; z--)
         {
-         if(g_zones[z].type < 0) //--- DEMAND
+         bool demand = (g_zones[z].type < 0);
+         //--- yaqin tomondagi teginish (test)
+         bool touch  = demand ? (low[b]  <= g_zones[z].top && high[b] >= g_zones[z].bot)
+                              : (high[b] >= g_zones[z].bot && low[b]  <= g_zones[z].top);
+         if(touch)
            {
-            if(low[b] <= g_zones[z].top && low[b] >= g_zones[z].bot)
-               g_zones[z].mitigated = true;         // tegildi
-            if(close[b] < g_zones[z].bot)            // sindirildi -> olib tashlanadi
-              { ObjectDelete(0, ZoneName(g_zones[z])); ArrayRemove(g_zones, z, 1); }
+            g_zones[z].mitigated = true;
+            if(!g_zones[z].inside){ g_zones[z].tests++; g_zones[z].inside = true; }
            }
-         else                     //--- SUPPLY
+         else
+            g_zones[z].inside = false;
+
+         //--- uzoq tomonga yetish = to'liq fill (FVG) / sweep (pool)
+         bool resolved = demand ? (low[b] <= g_zones[z].bot) : (high[b] >= g_zones[z].top);
+         if(resolved)
            {
-            if(high[b] >= g_zones[z].bot && high[b] <= g_zones[z].top)
-               g_zones[z].mitigated = true;
-            if(close[b] > g_zones[z].top)
-              { ObjectDelete(0, ZoneName(g_zones[z])); ArrayRemove(g_zones, z, 1); }
+            int life = b - g_zones[z].bornBar;
+            if(g_zones[z].kind == 0){ g_gapFilled++;  g_gapBars  += life; }
+            else                    { g_poolSwept++;  g_poolBars += life; }
+            ZoneDelete(g_zones[z]);
+            ArrayRemove(g_zones, z, 1);
            }
         }
 
@@ -322,10 +378,10 @@ void ScanZones(int rates_total, const datetime &time[], const double &high[],
         {
          //--- bullish gap -> DEMAND (narx ostidagi tayanch)
          if(low[b] > high[b-2] && (low[b] - high[b-2]) >= thr)
-            AddZone(time[b-2], low[b], high[b-2], -1, 0);
+            if(AddZone(time[b-2], low[b], high[b-2], -1, 0, b, (double)tickvol[b])) g_gapTot++;
          //--- bearish gap -> SUPPLY (narx ustidagi qarshilik)
          if(high[b] < low[b-2] && (low[b-2] - high[b]) >= thr)
-            AddZone(time[b-2], low[b-2], high[b], +1, 0);
+            if(AddZone(time[b-2], low[b-2], high[b], +1, 0, b, (double)tickvol[b])) g_gapTot++;
         }
 
       //--- 3) Stop-pool (swing pivot) aniqlash
@@ -342,9 +398,9 @@ void ScanZones(int rates_total, const datetime &time[], const double &high[],
 
             double poolH = atr[p] * ZonePoolATR;
             if(isHigh)  //--- swing high ustida SUPPLY pool
-               AddZone(time[p], high[p] + poolH, high[p], +1, 1);
+               if(AddZone(time[p], high[p] + poolH, high[p], +1, 1, p, (double)tickvol[p])) g_poolTot++;
             if(isLow)   //--- swing low ostida DEMAND pool
-               AddZone(time[p], low[p], low[p] - poolH, -1, 1);
+               if(AddZone(time[p], low[p], low[p] - poolH, -1, 1, p, (double)tickvol[p])) g_poolTot++;
            }
         }
      }
@@ -380,20 +436,49 @@ bool ZoneFilterPass(int dir, double price, double atrVal)
   }
 
 //+------------------------------------------------------------------+
-//| Zonalarni chizish va eng yaqin zonalarni hisoblash               |
+//| Zona bahosi (0-10): hajm + o'lcham + testlar + yaqinlik          |
 //+------------------------------------------------------------------+
-void DrawZones(double price)
+double ScoreZone(const SZone &z, double price, double atrVal)
+  {
+   if(atrVal <= 0) return(0.0);
+
+   double h     = z.top - z.bot;
+   double sizeF = MathMin(h / (atrVal * ScoreSizeNorm), 1.0);
+   double volF  = (g_volBase > 0) ? MathMin(z.vol / (g_volBase * ScoreVolNorm), 1.0) : 0.0;
+   double testF = MathMin(z.tests / MathMax(ScoreTestNorm, 1.0), 1.0);
+   double dist  = MathAbs((z.top + z.bot) / 2.0 - price);
+   double proxF = MathMax(1.0 - dist / (atrVal * ScoreProxNorm), 0.0);
+
+   double wSum = WeightVol + WeightSize + WeightTest + WeightProx;
+   if(wSum <= 0) return(0.0);
+
+   double raw = (volF*WeightVol + sizeF*WeightSize + testF*WeightTest + proxF*WeightProx) / wSum;
+   return(MathMin(MathMax(raw * 10.0, 0.0), 10.0));
+  }
+
+//+------------------------------------------------------------------+
+//| Zonalarni chizish, baholash va eng yaqin zonalarni hisoblash     |
+//+------------------------------------------------------------------+
+void DrawZones(double price, double atrVal)
   {
    g_nearDemand = 0.0;
    g_nearSupply = 0.0;
+   g_topScore   = 0.0;
    double bestDem = 0.0, bestSup = 0.0;
 
    for(int i = 0; i < ArraySize(g_zones); i++)
      {
+      //--- bahoni yangilaymiz
+      g_zones[i].score = ScoreZone(g_zones[i], price, atrVal);
       SZone z = g_zones[i];
+      if(z.score > g_topScore) g_topScore = z.score;
+
       string nm = ZoneName(z);
       color  c  = (z.type < 0) ? DemandColor : SupplyColor;
+      bool   elite = (z.score >= EliteThreshold);
       int    tr = z.mitigated ? MathMin(ZoneTransp + 8, 97) : ZoneTransp;
+      //--- elite zonalar bir oz to'yingroq ko'rinadi
+      if(elite && !z.mitigated) tr = MathMax(tr - 10, 55);
 
       //--- shaffoflik ARGB alfa kanali orqali (tr: 0=to'liq, 100=ko'rinmas)
       int  a     = (int)MathRound(255.0 * (100 - tr) / 100.0);
@@ -412,6 +497,30 @@ void DrawZones(double price)
       ObjectSetInteger(0, nm, OBJPROP_TIME, 1, TimeCurrent());
       ObjectSetDouble (0, nm, OBJPROP_PRICE, 1, z.bot);
       ObjectSetInteger(0, nm, OBJPROP_COLOR, fillC);
+
+      //--- baho yorlig'i (zona o'ng chetida)
+      string ln = ZoneLabelName(z);
+      if(ShowZoneScore)
+        {
+         string kd  = (z.kind == 0 ? "FVG" : "POOL");
+         string arw = (z.type > 0 ? "▲" : "▼");
+         string txt = arw + kd + " " + ScoreStars(z.score) + " " +
+                      DoubleToString(z.score, 1) + (z.tests > 0 ? " ·" + IntegerToString(z.tests) + "T" : "");
+         if(ObjectFind(0, ln) < 0)
+           {
+            ObjectCreate(0, ln, OBJ_TEXT, 0, TimeCurrent(), (z.top + z.bot) / 2.0);
+            ObjectSetInteger(0, ln, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, ln, OBJPROP_HIDDEN, true);
+            ObjectSetInteger(0, ln, OBJPROP_ANCHOR, ANCHOR_LEFT);
+            ObjectSetInteger(0, ln, OBJPROP_FONTSIZE, 8);
+           }
+         ObjectSetInteger(0, ln, OBJPROP_TIME, 0, TimeCurrent());
+         ObjectSetDouble (0, ln, OBJPROP_PRICE, 0, (z.top + z.bot) / 2.0);
+         ObjectSetString (0, ln, OBJPROP_TEXT, txt);
+         ObjectSetInteger(0, ln, OBJPROP_COLOR, elite ? clrGold : c);
+        }
+      else
+         ObjectDelete(0, ln);
 
       //--- eng yaqin zonalar (narxdan pastdagi demand va ustidagi supply)
       if(z.type < 0 && z.top <= price)      // demand narx ostida
@@ -470,11 +579,12 @@ int OnCalculate(const int rates_total,
    if(UseEMAFilter) minBars = MathMax(minBars, EMA_Period + 2);
    if(rates_total < minBars) return(0);
 
-   ArraySetAsSeries(time,  false);
-   ArraySetAsSeries(open,  false);
-   ArraySetAsSeries(high,  false);
-   ArraySetAsSeries(low,   false);
-   ArraySetAsSeries(close, false);
+   ArraySetAsSeries(time,        false);
+   ArraySetAsSeries(open,        false);
+   ArraySetAsSeries(high,        false);
+   ArraySetAsSeries(low,         false);
+   ArraySetAsSeries(close,       false);
+   ArraySetAsSeries(tick_volume, false);
 
    //--- ATR/EMA/RSI qiymatlarini olamiz.
    //--- Muhim: massivlar buferlar (rates_total) bilan bir xil o'lchamda va
@@ -520,7 +630,7 @@ int OnCalculate(const int rates_total,
    //--- likvidlik zonalarini yangilaymiz (signal filtridan OLDIN, chunki
    //--- filtr joriy zona holatiga tayanadi)
    if(UseFVG || UsePools)
-      ScanZones(rates_total, time, high, low, close, atr);
+      ScanZones(rates_total, time, high, low, close, atr, tick_volume);
 
    //--- MTF yo'nalish (joriy holatga)
    int mtfDir = HigherTFDirection();
@@ -583,9 +693,18 @@ int OnCalculate(const int rates_total,
         }
      }
 
-   //--- zonalarni chizamiz va eng yaqin zonalarni yangilaymiz
+   //--- zonalarni chizamiz, baholaymiz va eng yaqin zonalarni yangilaymiz
    if(UseFVG || UsePools)
-      DrawZones(close[rates_total-1]);
+     {
+      //--- hajm bazaviy chizig'i (scoring uchun)
+      int vlen = MathMin(VolBaseLen, rates_total);
+      long vsum = 0;
+      for(int k = rates_total - vlen; k < rates_total; k++)
+         vsum += tick_volume[k];
+      g_volBase = (vlen > 0) ? (double)vsum / vlen : 0.0;
+
+      DrawZones(close[rates_total-1], atr[rates_total-1]);
+     }
 
    //--- alertlar: faqat yopilgan oxirgi barda
    HandleAlerts(rates_total, time, close);
@@ -667,9 +786,9 @@ void HandleAlerts(int rates_total, const datetime &time[], const double &close[]
 //+------------------------------------------------------------------+
 void UpdateDashboard(double price, int dir, double rsiVal, int mtfDir)
   {
-   int x = 12, y = 22, w = 230, rowH = 20;
+   int x = 12, y = 22, w = 240, rowH = 20;
    bool showZones = (UseFVG || UsePools);
-   int rows = showZones ? 8 : 5;
+   int rows = showZones ? 11 : 5;
    string bg = DASH_PREFIX + "bg";
 
    //--- fon
@@ -720,13 +839,31 @@ void UpdateDashboard(double price, int dir, double rsiVal, int mtfDir)
       string demTxt = (g_nearDemand > 0.0)
                       ? DoubleToString(g_nearDemand, _Digits) : "—";
       DashLabel("t7", x, y + rowH*7, "▼ Demand: " + demTxt, clrSeaGreen, 9, false);
+
+      //--- eng kuchli zona bahosi
+      color topCol = (g_topScore >= EliteThreshold) ? clrGold
+                     : (g_topScore >= 5.0 ? clrSilver : clrGray);
+      DashLabel("t8", x, y + rowH*8, "Top ball: " + ScoreStars(g_topScore) + " " +
+                DoubleToString(g_topScore, 1) + "/10", topCol, 9, false);
+
+      //--- statistika: fill/sweep rate
+      double fillRate  = (g_gapTot  > 0) ? 100.0 * g_gapFilled / g_gapTot  : 0.0;
+      double sweepRate = (g_poolTot > 0) ? 100.0 * g_poolSwept / g_poolTot : 0.0;
+      double avgFill   = (g_gapFilled > 0) ? (double)g_gapBars  / g_gapFilled  : 0.0;
+      double avgSweep  = (g_poolSwept > 0) ? (double)g_poolBars / g_poolSwept : 0.0;
+
+      DashLabel("t9", x, y + rowH*9,
+                StringFormat("FVG fill:  %.0f%% (%d/%d) ~%.0fb", fillRate, g_gapFilled, g_gapTot, avgFill),
+                fillRate >= 50 ? clrMediumSeaGreen : clrGoldenrod, 9, false);
+      DashLabel("t10", x, y + rowH*10,
+                StringFormat("Pool sweep: %.0f%% (%d/%d) ~%.0fb", sweepRate, g_poolSwept, g_poolTot, avgSweep),
+                sweepRate >= 50 ? clrOrchid : clrGoldenrod, 9, false);
      }
    else
      {
       //--- zonalar o'chirilgan bo'lsa qoldiq yozuvlarni tozalaymiz
-      ObjectDelete(0, DASH_PREFIX + "t5");
-      ObjectDelete(0, DASH_PREFIX + "t6");
-      ObjectDelete(0, DASH_PREFIX + "t7");
+      for(int r = 5; r <= 10; r++)
+         ObjectDelete(0, DASH_PREFIX + "t" + IntegerToString(r));
      }
 
    ChartRedraw();
