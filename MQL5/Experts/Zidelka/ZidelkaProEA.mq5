@@ -31,6 +31,18 @@ input bool            InpUseMTF       = true;      // MTF filtri
 input ENUM_TIMEFRAMES InpHigherTF     = PERIOD_H4; // Yuqori taymfreym
 input int             InpArrowGap     = 15;        // O'q masofasi (pips)
 
+input group "=== Likvidlik zonalari (indikator bilan mos) ==="
+input bool            InpUseFVG       = true;      // Imbalance (FVG) zonalari
+input bool            InpUsePools     = true;      // Stop-pool (swing) zonalari
+input int             InpZonePivotL   = 8;         // Pivot chap
+input int             InpZonePivotR   = 3;         // Pivot o'ng
+input double          InpZoneMinATR   = 0.10;      // Min zona balandligi (ATR)
+input double          InpZonePoolATR  = 0.30;      // Stop-pool balandligi (ATR)
+input int             InpZoneLookback = 500;       // Zona qidirish oralig'i (bar)
+input int             InpMaxZones     = 24;        // Maksimal faol zonalar
+input bool            InpUseLiqFilter = false;     // Signalni zonalar bilan filtrlash
+input double          InpZoneProxATR  = 2.0;       // Zona yaqinligi (ATR)
+
 input group "=== Savdo boshqaruvi ==="
 input long            InpMagic        = 20260720;  // Magic number
 input string          InpComment      = "ZidelkaPro"; // Buyurtma izohi
@@ -93,7 +105,12 @@ int OnInit()
                       InpArrowGap,
                       clrLime, clrRed,   // BuyArrowColor, SellArrowColor
                       false,             // ShowDashboard (EA'da o'chirilgan)
-                      false, false, false, false, ""); // alertlar o'chirilgan
+                      false, false, false, false, "", // alertlar o'chirilgan
+                      //--- likvidlik zonalari (indikator inputlari tartibida)
+                      InpUseFVG, InpUsePools, InpZonePivotL, InpZonePivotR,
+                      InpZoneMinATR, InpZonePoolATR, InpZoneLookback, InpMaxZones,
+                      InpUseLiqFilter, InpZoneProxATR,
+                      clrSeaGreen, clrFireBrick, 85); // zona ranglari/shaffofligi
 
    if(g_handle == INVALID_HANDLE)
      {

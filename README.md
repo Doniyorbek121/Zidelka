@@ -18,11 +18,30 @@ Signal faqat quyidagi shartlarning **hammasi** mos kelganda paydo bo'ladi:
 Natijada faqat **trend + yo'nalish + impuls + yuqori taymfreym** birlashgan
 paytda BUY (▲) yoki SELL (▼) o'qi chiziladi.
 
+### Likvidlik zonalari (SMC) — konfluensiya qatlami
+
+Indikator qo'shimcha ravishda **institutsional likvidlik zonalarini** aniqlaydi
+va grafikda chizadi (Smart Money Concepts uslubida):
+
+| Zona | Aniqlash | Ma'no |
+|------|----------|-------|
+| **Imbalance (FVG)** | 3-barli bo'shliq (fair value gap) | Bozor tez o'tib ketgan, qaytib to'ldirishga moyil narx sohasi |
+| **Stop-pool** | Swing pivot (yuqori/quyi ekstremum) | Stop-loss'lar to'plangan likvidlik javoni |
+
+- 🟩 **Demand** (narx ostida) — tayanch sifatida ishlaydi
+- 🟥 **Supply** (narx ustida) — qarshilik sifatida ishlaydi
+- Zonalar narx tomonidan **iste'mol qilinganda** so'nadi, **sindirilganda** yo'qoladi
+
+Ixtiyoriy **`UseLiquidityFilter`** parametri yoqilsa, signal faqat mos zona
+yaqinida (masalan, BUY uchun pastda demand zonasi bor bo'lsa) tasdiqlanadi —
+bu signal sifatini yanada oshiradi.
+
 ## Xususiyatlari
 
 - 🎯 Supertrend asosidagi rangli trend chizig'i (ko'k = ko'tarilish, qizil = tushish)
 - 🟢🔴 Grafikda BUY/SELL o'qlari (native buferlar, Data Window'da ko'rinadi)
-- 📊 Grafik ustidagi jonli **dashboard**: trend, RSI, MTF holati, joriy narx
+- 🟩🟥 **Likvidlik zonalari**: FVG imbalance + stop-pool (SMC) — konfluensiya va ixtiyoriy filtr
+- 📊 Grafik ustidagi jonli **dashboard**: trend, RSI, MTF, zonalar, eng yaqin demand/supply
 - 🔔 To'liq alertlar: ekran, mobil push, email, ovoz
 - ⚙️ Har bir filtrni alohida yoqish/o'chirish imkoniyati
 - 📱 5/3 xonali kotirovkalar uchun avtomatik pips hisoblash
@@ -48,6 +67,10 @@ paytda BUY (▲) yoki SELL (▼) o'qi chiziladi.
 | `UseMTFFilter` / `HigherTF` | true / H4 | Yuqori taymfreym tasdig'i |
 | `ArrowGapPips` | 15 | O'q va narx orasidagi masofa |
 | `AlertPopup/Push/Email/Sound` | — | Ogohlantirish kanallari |
+| `UseFVG` / `UsePools` | true / true | Imbalance va stop-pool zonalarini ko'rsatish |
+| `UseLiquidityFilter` | false | Signalni likvidlik zonalari bilan filtrlash |
+| `ZoneProxATR` | 2.0 | Zona yaqinlik oralig'i (ATR) |
+| `MaxZones` | 24 | Bir vaqtda ko'rsatiladigan maks. zonalar |
 
 ## Expert Advisor (avtomatik savdo roboti)
 
