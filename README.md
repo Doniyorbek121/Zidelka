@@ -54,6 +54,20 @@ Har bir zona yorlig'ida `▲FVG ★★★ 7.2 ·2T` ko'rinishida ball va test so
 **pool sweep rate** (stop-pool'lar necha % supurildi) va o'rtacha hal bo'lish vaqti (bar).
 Bu — indikatorning shu bozordagi tarixiy ishonchliligini ko'rsatuvchi ko'zgu.
 
+### Net Pull (bosim) paneli
+
+Likvidlik magnit kabi ishlaydi — narx likvidlik to'plangan tomonga tortiladi.
+**Net Pull** paneli barcha zonalarning **ball va hajm bilan vaznlangan massasini**
+narxdan yuqori va quyi taqsimlab, bozor qay tomonga "tortilayotganini" ko'rsatadi:
+
+- **Massa (M ▲/▼)** — yuqori va quyi zonalarning umumiy og'irligi
+- **Grafik gauge** — chap (yashil) = pastga tortish, o'ng (qizil) = yuqoriga tortish
+- **Pull bias %** — muvozanatdan chetlanish (`▲ YUQORIGA`, `▼ PASTGA`, `MUVOZANAT`)
+- **Tug-of-war** o'lchagichi (◀▶) — kuchlar tortishuvi
+
+> Bu bosim yo'nalishi trend signaliga qo'shimcha kontekst beradi: masalan, BUY
+> signalida yuqoriga kuchli pull bo'lsa — harakat uchun ko'proq "joy" bor demakdir.
+
 ## Xususiyatlari
 
 - 🎯 Supertrend asosidagi rangli trend chizig'i (ko'k = ko'tarilish, qizil = tushish)
@@ -61,7 +75,8 @@ Bu — indikatorning shu bozordagi tarixiy ishonchliligini ko'rsatuvchi ko'zgu.
 - 🟩🟥 **Likvidlik zonalari**: FVG imbalance + stop-pool (SMC) — konfluensiya va ixtiyoriy filtr
 - ⭐ **Zona bahosi (0–10)**: hajm bosimi + o'lcham + testlar + yaqinlik bo'yicha vaznli scoring
 - 📈 **Statistika**: FVG fill rate, pool sweep rate, o'rtacha hal bo'lish vaqti
-- 📊 Grafik ustidagi jonli **dashboard**: trend, RSI, MTF, zonalar, top ball, fill/sweep rate
+- ⚖️ **Net Pull bosim paneli**: bozor qay tomonga tortilyapti (grafik gauge + tug-of-war)
+- 📊 Grafik ustidagi jonli **dashboard**: trend, RSI, MTF, zonalar, top ball, fill/sweep, bosim
 - 🔔 To'liq alertlar: ekran, mobil push, email, ovoz
 - ⚙️ Har bir filtrni alohida yoqish/o'chirish imkoniyati
 - 📱 5/3 xonali kotirovkalar uchun avtomatik pips hisoblash

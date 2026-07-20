@@ -7,10 +7,10 @@
 //+------------------------------------------------------------------+
 #property copyright   "Zidelka"
 #property link        "https://github.com/Doniyorbek121/Zidelka"
-#property version     "1.20"
+#property version     "1.30"
 #property description "Professional konfluensiyaga asoslangan signal indikatori."
 #property description "Supertrend + EMA + RSI + MTF + likvidlik zonalari (SMC)."
-#property description "Zona bahosi (0-10), fill/sweep statistikasi, dashboard va alertlar."
+#property description "Zona bahosi (0-10), fill/sweep statistikasi, net-pull bosim paneli."
 #property strict
 
 //--- Indikator sozlamalari
@@ -109,6 +109,9 @@ input double             WeightSize      = 0.25;         // Og'irlik: zona o'lch
 input double             WeightTest      = 0.20;         // Og'irlik: testlar
 input double             WeightProx      = 0.25;         // Og'irlik: yaqinlik
 
+input group "=== Bosim (Net Pull) ==="
+input bool               ShowPressure    = true;         // Net pull bosim panelini ko'rsatish
+
 //+------------------------------------------------------------------+
 //| Buferlar                                                         |
 //+------------------------------------------------------------------+
@@ -161,6 +164,11 @@ double   g_nearDemand  = 0.0;     // dashboard uchun: eng yaqin talab zonasi
 double   g_nearSupply  = 0.0;     // dashboard uchun: eng yaqin taklif zonasi
 double   g_volBase     = 0.0;     // hajm bazaviy chizig'i (scoring)
 double   g_topScore    = 0.0;     // eng kuchli faol zona bahosi
+
+//--- net pull (bosim) holati
+double   g_massUp      = 0.0;     // narx ustidagi zonalar massasi
+double   g_massDn      = 0.0;     // narx ostidagi zonalar massasi
+double   g_pullBias    = 0.0;     // -100..+100 (musbat = yuqoriga tortish)
 
 //--- statistika hisoblagichlari
 int      g_gapTot = 0,  g_gapFilled = 0;   long g_gapBars = 0;
@@ -464,6 +472,8 @@ void DrawZones(double price, double atrVal)
    g_nearDemand = 0.0;
    g_nearSupply = 0.0;
    g_topScore   = 0.0;
+   g_massUp     = 0.0;
+   g_massDn     = 0.0;
    double bestDem = 0.0, bestSup = 0.0;
 
    for(int i = 0; i < ArraySize(g_zones); i++)
@@ -472,6 +482,13 @@ void DrawZones(double price, double atrVal)
       g_zones[i].score = ScoreZone(g_zones[i], price, atrVal);
       SZone z = g_zones[i];
       if(z.score > g_topScore) g_topScore = z.score;
+
+      //--- net pull massasi: ball × (1 + log(1 + hajm/baza))
+      double volK = (g_volBase > 0) ? z.vol / g_volBase : 0.0;
+      double w    = z.score * (1.0 + MathLog(1.0 + volK));
+      double mid  = (z.top + z.bot) / 2.0;
+      if(mid > price) g_massUp += w;   // narx ustidagi likvidlik yuqoriga tortadi
+      else            g_massDn += w;   // narx ostidagi likvidlik pastga tortadi
 
       string nm = ZoneName(z);
       color  c  = (z.type < 0) ? DemandColor : SupplyColor;
@@ -531,6 +548,11 @@ void DrawZones(double price, double atrVal)
 
    g_nearDemand = bestDem;
    g_nearSupply = bestSup;
+
+   //--- net pull bias: -100 (pastga) .. +100 (yuqoriga)
+   double massTot = g_massUp + g_massDn;
+   double shareUp = (massTot > 0) ? g_massUp / massTot : 0.5;
+   g_pullBias = (shareUp - 0.5) * 200.0;
   }
 
 //+------------------------------------------------------------------+
@@ -782,13 +804,61 @@ void HandleAlerts(int rates_total, const datetime &time[], const double &close[]
   }
 
 //+------------------------------------------------------------------+
+//| Tug-of-war matn o'lchagichi (chap = pastga, o'ng = yuqoriga)     |
+//+------------------------------------------------------------------+
+string TugMeter(double downShare, int cells)
+  {
+   int l = (int)MathRound(MathMin(MathMax(downShare, 0.0), 1.0) * cells);
+   string s = "";
+   for(int i = 1; i <= cells; i++)
+      s += (i <= l ? "◀" : "▶");
+   return(s);
+  }
+
+//+------------------------------------------------------------------+
+//| Dashboard to'rtburchak (gauge segmenti)                          |
+//+------------------------------------------------------------------+
+void DashRect(string id, int x, int y, int w, int h, color bg)
+  {
+   string nm = DASH_PREFIX + id;
+   if(w <= 0){ ObjectDelete(0, nm); return; }
+   if(ObjectFind(0, nm) < 0)
+      ObjectCreate(0, nm, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, nm, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, nm, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, nm, OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, nm, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, bg);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+  }
+
+//+------------------------------------------------------------------+
+//| Grafik net-pull gauge (chap=demand, o'ng=supply)                 |
+//+------------------------------------------------------------------+
+void DashGauge(int x, int y, int w, int h, double shareUp)
+  {
+   int upW = (int)MathRound(MathMin(MathMax(shareUp, 0.0), 1.0) * w);
+   int dnW = w - upW;
+   DashRect("gDn",  x,       y,   dnW, h, DemandColor);   // pastga (chap)
+   DashRect("gUp",  x + dnW, y,   upW, h, SupplyColor);   // yuqoriga (o'ng)
+   DashRect("gMid", x + w/2 - 1, y - 2, 2, h + 4, clrWhite); // markaz belgisi
+  }
+
+//+------------------------------------------------------------------+
 //| Dashboard paneli                                                 |
 //+------------------------------------------------------------------+
 void UpdateDashboard(double price, int dir, double rsiVal, int mtfDir)
   {
    int x = 12, y = 22, w = 240, rowH = 20;
    bool showZones = (UseFVG || UsePools);
-   int rows = showZones ? 11 : 5;
+   bool showPress = showZones && ShowPressure;
+   int rows = 5;
+   if(showZones) rows = showPress ? 14 : 11;
    string bg = DASH_PREFIX + "bg";
 
    //--- fon
@@ -864,6 +934,37 @@ void UpdateDashboard(double price, int dir, double rsiVal, int mtfDir)
       //--- zonalar o'chirilgan bo'lsa qoldiq yozuvlarni tozalaymiz
       for(int r = 5; r <= 10; r++)
          ObjectDelete(0, DASH_PREFIX + "t" + IntegerToString(r));
+     }
+
+   //--- NET PULL (bosim) bloki
+   if(showPress)
+     {
+      double shareUp = g_pullBias / 200.0 + 0.5;      // 0..1
+      double biasAbs = MathAbs(g_pullBias);
+      string pullTxt = biasAbs < 8 ? "MUVOZANAT"
+                       : (g_pullBias > 0 ? "▲ YUQORIGA" : "▼ PASTGA");
+      color  pullCol = biasAbs < 8 ? clrGold
+                       : (g_pullBias > 0 ? clrFireBrick : clrSeaGreen);
+
+      DashLabel("t11", x, y + rowH*11,
+                StringFormat("Net Pull: %s %.0f%%", pullTxt, biasAbs), pullCol, 9, true);
+
+      //--- grafik gauge (12-qator o'rnida)
+      DashGauge(x, y + rowH*12 + 4, w - 24, 10, shareUp);
+
+      //--- massalar + tug matn o'lchagichi (13-qator)
+      DashLabel("t13", x, y + rowH*13,
+                StringFormat("M ▲%.0f ▼%.0f  %s", g_massUp, g_massDn, TugMeter(1.0 - shareUp, 10)),
+                clrSilver, 9, false);
+     }
+   else
+     {
+      //--- bosim o'chirilgan bo'lsa qoldiqlarni tozalaymiz
+      ObjectDelete(0, DASH_PREFIX + "t11");
+      ObjectDelete(0, DASH_PREFIX + "t13");
+      ObjectDelete(0, DASH_PREFIX + "gDn");
+      ObjectDelete(0, DASH_PREFIX + "gUp");
+      ObjectDelete(0, DASH_PREFIX + "gMid");
      }
 
    ChartRedraw();
