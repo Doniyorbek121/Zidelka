@@ -49,6 +49,32 @@ paytda BUY (▲) yoki SELL (▼) o'qi chiziladi.
 | `ArrowGapPips` | 15 | O'q va narx orasidagi masofa |
 | `AlertPopup/Push/Email/Sound` | — | Ogohlantirish kanallari |
 
+## Expert Advisor (avtomatik savdo roboti)
+
+`MQL5/Experts/Zidelka/ZidelkaProEA.mq5` — yuqoridagi indikator signallariga
+asoslangan avtomatik savdo roboti. Robot indikatorni `iCustom` orqali o'qiydi,
+shuning uchun grafikdagi indikator bilan **to'liq sinxron** ishlaydi.
+
+**Xususiyatlari:**
+
+- 📉 Signal faqat **bar yopilgach** tasdiqlanadi (qayta chizmaydi)
+- 💰 **Risk asosida lot** hisoblash (balansdan % risk) yoki fiksatsiyalangan lot
+- 🛡️ **SL rejimlari:** ATR × koeffitsient / Supertrend chizig'i / fiksatsiyalangan points
+- 🎯 **TP** — SL'ga nisbatan R:R koeffitsienti bilan
+- 🔄 **Supertrend bo'ylab trailing stop** (foyda ochilgach)
+- ↔️ Qarama-qarshi signalda pozitsiyani **teskarilash**
+- ⏰ Savdo soatlari filtri, spread filtri, slippage nazorati, Magic number
+
+**O'rnatish (indikator o'rnatilgan bo'lishi shart):**
+
+1. `ZidelkaProSignal.mq5` ni `MQL5/Indicators/Zidelka/` ga qo'ying va kompilyatsiya qiling.
+2. `ZidelkaProEA.mq5` ni `MQL5/Experts/Zidelka/` ga qo'ying va **F7** bilan kompilyatsiya qiling.
+3. Grafikka tashlang, `AutoTrading` tugmasini yoqing.
+
+> ⚠️ EA parametrlari (ATR davri, EMA, RSI, MTF) grafikdagi indikator
+> sozlamalari bilan **bir xil** bo'lishi shart — aks holda buferlar mos kelmaydi.
+> Har doim avval **Strategy Tester** va **demo hisob**da sinab ko'ring.
+
 ## Tavsiyalar
 
 - **Skalping (M5–M15):** `ATR_Multiplier` 2.0, `HigherTF` = H1.
