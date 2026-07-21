@@ -38,20 +38,26 @@ jobs:
           if (-not $ok) { Write-Error "MT5 setup yuklab bo'lmadi"; exit 1 }
 
           Write-Host "MT5 sokin o'rnatilmoqda..."
-          Start-Process -FilePath ".\mt5setup.exe" -ArgumentList "/auto" -PassThru | Out-Null
+          Start-Process -FilePath ".\mt5setup.exe" -ArgumentList "/auto" | Out-Null
 
+          # To'liq o'rnatishni kutamiz: ham metaeditor64.exe, ham standart
+          # Include (Trade/Trade.mqh) paydo bo'lguncha.
           $editor = "C:\Program Files\MetaTrader 5\metaeditor64.exe"
+          $inc    = "C:\Program Files\MetaTrader 5\MQL5\Include\Trade\Trade.mqh"
           $elapsed = 0
-          while (-not (Test-Path $editor) -and $elapsed -lt 360) {
+          while ((-not (Test-Path $editor) -or -not (Test-Path $inc)) -and $elapsed -lt 480) {
             Start-Sleep -Seconds 10; $elapsed += 10
           }
           if (-not (Test-Path $editor)) {
             Write-Error "MetaEditor topilmadi — o'rnatish vaqti tugadi"; exit 1
           }
-          Write-Host "MetaEditor tayyor: $editor"
-
-          # avtomatik ochilgan terminalni yopamiz (kompilyatsiya uchun kerak emas)
+          if (-not (Test-Path $inc)) {
+            Write-Host "::warning::Standart Include topilmadi — kompilyatsiya xato berishi mumkin"
+          }
+          # o'rnatuvchi tugashi uchun biroz kutamiz, terminalni yopamiz
+          Start-Sleep -Seconds 20
           Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Write-Host "MetaEditor tayyor: $editor"
 
       - name: Compile sources
         shell: pwsh
@@ -60,7 +66,7 @@ jobs:
           $mql5   = "C:\Program Files\MetaTrader 5\MQL5"
 
           # repo fayllarini MT5 MQL5 daraxtiga nusxalaymiz (standart
-          # #include <Trade/...> lar shu yerdan topiladi)
+          # #include <Trade/...> lar shu yerdan avtomatik topiladi)
           New-Item -ItemType Directory -Force -Path "$mql5\Indicators\Zidelka" | Out-Null
           New-Item -ItemType Directory -Force -Path "$mql5\Experts\Zidelka"    | Out-Null
           Copy-Item -Recurse -Force "MQL5\Indicators\Zidelka\*" "$mql5\Indicators\Zidelka\"
@@ -75,21 +81,40 @@ jobs:
           $failed = $false
           foreach ($f in $files) {
             $log = "$f.log"
+            if (Test-Path $log) { Remove-Item $log -Force }
+
             Write-Host "==================================================="
             Write-Host "Kompilyatsiya: $f"
-            & $editor "/compile:$f" "/inc:$mql5" "/log:$log" | Out-Null
-            Start-Sleep -Seconds 3
+
+            # metaeditor64.exe — GUI ilova, shuning uchun jarayon tugashini
+            # ANIQ kutamiz. ProcessStartInfo.ArgumentList bo'shliqli yo'llarni
+            # to'g'ri (har biri alohida argv sifatida) uzatadi.
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $editor
+            [void]$psi.ArgumentList.Add("/compile:$f")
+            [void]$psi.ArgumentList.Add("/inc:$mql5")
+            [void]$psi.ArgumentList.Add("/log:$log")
+            $psi.UseShellExecute = $false
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            if (-not $proc.WaitForExit(120000)) {
+              try { $proc.Kill() } catch {}
+              Write-Host "::error file=$f::Kompilyatsiya vaqti tugadi (timeout)"
+              $failed = $true
+              continue
+            }
+            $code = $proc.ExitCode
+            Start-Sleep -Seconds 1
 
             if (Test-Path $log) {
               $content = Get-Content $log -Encoding Unicode
               $content | ForEach-Object { Write-Host $_ }
-              # xato bo'lsa (1 yoki undan ko'p) — muvaffaqiyatsiz
-              if ($content -match "(?<n>[1-9]\d*)\s+error") {
+              # metaeditor logi: "... N error(s), M warning(s)"
+              if ($content -match "[1-9]\d*\s+error") {
                 Write-Host "::error file=$f::Kompilyatsiya xatolari topildi"
                 $failed = $true
               }
             } else {
-              Write-Host "::error file=$f::Kompilyatsiya logi yaratilmadi"
+              Write-Host "::error file=$f::Kompilyatsiya logi yaratilmadi (exit $code)"
               $failed = $true
             }
           }
