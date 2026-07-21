@@ -96,21 +96,14 @@ double   g_point     = 0.0;
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   //--- indikator handle'i (buferlar mos bo'lishi uchun barcha inputlar tartibda)
-   g_handle = iCustom(_Symbol, _Period, "Zidelka\\ZidelkaProSignal",
-                      InpATRPeriod, InpATRMult,
-                      InpUseEMA, InpEMAPeriod,
-                      InpUseRSI, InpRSIPeriod, InpRSIBuy, InpRSISell,
-                      InpUseMTF, InpHigherTF,
-                      InpArrowGap,
-                      clrLime, clrRed,   // BuyArrowColor, SellArrowColor
-                      false,             // ShowDashboard (EA'da o'chirilgan)
-                      false, false, false, false, "", // alertlar o'chirilgan
-                      //--- likvidlik zonalari (indikator inputlari tartibida)
-                      InpUseFVG, InpUsePools, InpZonePivotL, InpZonePivotR,
-                      InpZoneMinATR, InpZonePoolATR, InpZoneLookback, InpMaxZones,
-                      InpUseLiqFilter, InpZoneProxATR,
-                      clrSeaGreen, clrFireBrick, 85); // zona ranglari/shaffofligi
+   //--- Indikator handle'i. MUHIM: iCustom PARAMETRSIZ chaqiriladi.
+   //--- Ba'zi MT5 build'larda iCustom uzatilgan parametrlar sonini indikator
+   //--- inputlari soniga AYNAN mos kelishini talab qiladi; mos kelmasa 4002
+   //--- ("cannot load custom indicator") xatosi chiqadi. Parametrsiz chaqiruv
+   //--- indikatorni STANDART sozlamalari bilan yuklaydi (aynan kerakli sozlama)
+   //--- va hech qanday moslik talab qilinmaydi. EA baribir 2/3/4/5 buferlarni
+   //--- (BUY/SELL/Supertrend/Dir) o'qiydi — ular sozlamaga bog'liq emas.
+   g_handle = iCustom(_Symbol, _Period, "Zidelka\\ZidelkaProSignal");
 
    if(g_handle == INVALID_HANDLE)
      {

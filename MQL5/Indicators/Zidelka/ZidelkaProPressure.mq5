@@ -82,28 +82,12 @@ int OnInit()
    IndicatorSetString(INDICATOR_SHORTNAME, "Zidelka Pro Net Pull");
    IndicatorSetInteger(INDICATOR_DIGITS, 1);
 
-   //--- asosiy indikatorni yuklaymiz (chizmasdan — barcha vizuallar o'chirilgan).
-   //--- Parametrlar tartibi ZidelkaProSignal inputlari bilan bir xil.
-   g_handle = iCustom(_Symbol, _Period, "Zidelka\\ZidelkaProSignal",
-                      InpATRPeriod, 3.0,            // ATR_Period, ATR_Multiplier
-                      true, 200,                    // UseEMA, EMA_Period
-                      true, 14, 50.0, 50.0,         // UseRSI, RSI_Period, RSI_Buy, RSI_Sell
-                      true, PERIOD_H4,              // UseMTF, HigherTF
-                      15,                           // ArrowGapPips
-                      clrLime, clrRed,              // Buy/Sell rang
-                      false,                        // ShowDashboard OFF
-                      false, false, false, false, "", // alertlar OFF
-                      InpUseFVG, InpUsePools,       // UseFVG, UsePools
-                      InpZonePivotL, InpZonePivotR, // pivotlar
-                      InpZoneMinATR, InpZonePoolATR,
-                      InpZoneLookback, InpMaxZones,
-                      false, 2.0,                   // UseLiquidityFilter OFF, ZoneProxATR
-                      clrSeaGreen, clrFireBrick, 85,// zona rang/shaffoflik (chizilmaydi)
-                      false, 8.0,                   // ShowZoneScore OFF, EliteThreshold
-                      InpVolBaseLen,
-                      InpScoreSizeNorm, InpScoreVolNorm, InpScoreTestNorm, InpScoreProxNorm,
-                      InpWeightVol, InpWeightSize, InpWeightTest, InpWeightProx,
-                      false);                       // ShowPressure OFF
+   //--- Asosiy indikatorni yuklaymiz. MUHIM: iCustom PARAMETRSIZ chaqiriladi.
+   //--- Ba'zi MT5 build'larda iCustom parametrlar sonini indikator inputlari
+   //--- soniga AYNAN mos kelishini talab qiladi; mos kelmasa 4002 xatosi.
+   //--- Parametrsiz chaqiruv indikatorni STANDART sozlamalari bilan yuklaydi
+   //--- va 6-buferni (net-pull) to'g'ri o'qish uchun yetarli.
+   g_handle = iCustom(_Symbol, _Period, "Zidelka\\ZidelkaProSignal");
 
    if(g_handle == INVALID_HANDLE)
      {
