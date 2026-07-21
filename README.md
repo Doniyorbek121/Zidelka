@@ -1,5 +1,7 @@
 # Zidelka Pro Signal — MetaTrader 5 professional indikatori
 
+![MQL5 Validate](https://github.com/Doniyorbek121/Zidelka/actions/workflows/mql5-validate.yml/badge.svg)
+
 Konfluensiyaga (bir nechta mustaqil signalning bir vaqtda mos kelishiga)
 asoslangan professional savdo indikatori. Bitta ko'rsatkichga tayanmasdan,
 **to'rt bosqichli filtr** orqali yuqori sifatli kirish nuqtalarini beradi.
