@@ -1,0 +1,111 @@
+name: MQL5 Compile (MetaEditor)
+
+# MetaTrader 5 ni Windows runnerga o'rnatib, metaeditor64.exe orqali
+# haqiqiy kompilyatsiya qiladi. Bu to'liq semantik tekshiruv (validate
+# workflow'idan ko'ra kuchliroq), lekin MT5 yuklab-o'rnatishga bog'liq
+# bo'lgani uchun biroz sekinroq/beqarorroq bo'lishi mumkin.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  compile:
+    name: Compile with MetaEditor
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download & install MetaTrader 5
+        shell: pwsh
+        run: |
+          $url = "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+          $ok = $false
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              Write-Host "MT5 setup yuklab olinmoqda (urinish $i)..."
+              Invoke-WebRequest -Uri $url -OutFile "mt5setup.exe" -UseBasicParsing
+              $ok = $true; break
+            } catch {
+              Write-Host "Yuklash xatosi: $_"; Start-Sleep -Seconds 10
+            }
+          }
+          if (-not $ok) { Write-Error "MT5 setup yuklab bo'lmadi"; exit 1 }
+
+          Write-Host "MT5 sokin o'rnatilmoqda..."
+          Start-Process -FilePath ".\mt5setup.exe" -ArgumentList "/auto" -PassThru | Out-Null
+
+          $editor = "C:\Program Files\MetaTrader 5\metaeditor64.exe"
+          $elapsed = 0
+          while (-not (Test-Path $editor) -and $elapsed -lt 360) {
+            Start-Sleep -Seconds 10; $elapsed += 10
+          }
+          if (-not (Test-Path $editor)) {
+            Write-Error "MetaEditor topilmadi — o'rnatish vaqti tugadi"; exit 1
+          }
+          Write-Host "MetaEditor tayyor: $editor"
+
+          # avtomatik ochilgan terminalni yopamiz (kompilyatsiya uchun kerak emas)
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Compile sources
+        shell: pwsh
+        run: |
+          $editor = "C:\Program Files\MetaTrader 5\metaeditor64.exe"
+          $mql5   = "C:\Program Files\MetaTrader 5\MQL5"
+
+          # repo fayllarini MT5 MQL5 daraxtiga nusxalaymiz (standart
+          # #include <Trade/...> lar shu yerdan topiladi)
+          New-Item -ItemType Directory -Force -Path "$mql5\Indicators\Zidelka" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$mql5\Experts\Zidelka"    | Out-Null
+          Copy-Item -Recurse -Force "MQL5\Indicators\Zidelka\*" "$mql5\Indicators\Zidelka\"
+          Copy-Item -Recurse -Force "MQL5\Experts\Zidelka\*"    "$mql5\Experts\Zidelka\"
+
+          $files = @(
+            "$mql5\Indicators\Zidelka\ZidelkaProSignal.mq5",
+            "$mql5\Indicators\Zidelka\ZidelkaProPressure.mq5",
+            "$mql5\Experts\Zidelka\ZidelkaProEA.mq5"
+          )
+
+          $failed = $false
+          foreach ($f in $files) {
+            $log = "$f.log"
+            Write-Host "==================================================="
+            Write-Host "Kompilyatsiya: $f"
+            & $editor "/compile:$f" "/inc:$mql5" "/log:$log" | Out-Null
+            Start-Sleep -Seconds 3
+
+            if (Test-Path $log) {
+              $content = Get-Content $log -Encoding Unicode
+              $content | ForEach-Object { Write-Host $_ }
+              # xato bo'lsa (1 yoki undan ko'p) — muvaffaqiyatsiz
+              if ($content -match "(?<n>[1-9]\d*)\s+error") {
+                Write-Host "::error file=$f::Kompilyatsiya xatolari topildi"
+                $failed = $true
+              }
+            } else {
+              Write-Host "::error file=$f::Kompilyatsiya logi yaratilmadi"
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            Write-Error "Bir yoki bir nechta fayl kompilyatsiyadan o'tmadi"
+            exit 1
+          }
+          Write-Host "Barcha fayllar muvaffaqiyatli kompilyatsiya qilindi."
+
+      - name: Upload compiled binaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mql5-binaries
+          path: |
+            C:\Program Files\MetaTrader 5\MQL5\Indicators\Zidelka\*.ex5
+            C:\Program Files\MetaTrader 5\MQL5\Experts\Zidelka\*.ex5
+          if-no-files-found: ignore
