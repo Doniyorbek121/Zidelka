@@ -1,0 +1,37 @@
+name: MQL5 Validate
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate MQL5 sources
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate .mq5 / .mqh structure
+        run: python3 .github/scripts/validate_mql5.py .
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## MQL5 Validation"
+            echo ""
+            echo "Struktura tekshiruvi bajarildi (qavslar balansi, majburiy"
+            echo "\`#property version\`, hodisa funksiyalari, Pine sintaksis, UTF-8)."
+            echo ""
+            echo "> Eslatma: bu to'liq kompilyatsiya emas. Yakuniy tasdiq uchun"
+            echo "> MetaEditor'da (F7) kompilyatsiya qiling."
+          } >> "$GITHUB_STEP_SUMMARY"
