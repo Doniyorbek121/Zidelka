@@ -1,22 +1,26 @@
-name: MQL5 Compile (MetaEditor)
+name: MQL5 Compile (MetaEditor) — best-effort
 
 # MetaTrader 5 ni Windows runnerga o'rnatib, metaeditor64.exe orqali
-# haqiqiy kompilyatsiya qiladi. Bu to'liq semantik tekshiruv (validate
-# workflow'idan ko'ra kuchliroq), lekin MT5 yuklab-o'rnatishga bog'liq
-# bo'lgani uchun biroz sekinroq/beqarorroq bo'lishi mumkin.
+# HAQIQIY kompilyatsiya qilishga urinadi.
+#
+# MUHIM: GitHub-hosted runnerda sokin o'rnatilgan MetaEditor headless
+# rejimda ishonchli kompilyatsiya QILMAYDI (odatda oldindan faollashtirilgan
+# terminal/hisob talab qiladi) — u ko'pincha .ex5/log yaratmaydi. Shu sababli
+# bu workflow "best-effort" bo'lib, FAQAT qo'lda ishga tushiriladi
+# (workflow_dispatch) va natijasi umumiy holatni BLOKLAMAYDI.
+#
+# Asosiy, ishonchli tekshiruv — mql5-validate.yml (Linux struktura) hamda
+# yakuniy MetaEditor F7 kompilyatsiyasi (mahalliy).
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
-    branches: ["**"]
   workflow_dispatch:
 
 jobs:
   compile:
-    name: Compile with MetaEditor
+    name: Compile with MetaEditor (best-effort)
     runs-on: windows-latest
     timeout-minutes: 30
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
