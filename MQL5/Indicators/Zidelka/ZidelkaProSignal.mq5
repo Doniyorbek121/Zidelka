@@ -524,7 +524,7 @@ void DrawZones(double price, double atrVal)
       if(elite && !z.mitigated) tr = MathMax(tr - 10, 55);
 
       //--- shaffoflik ARGB alfa kanali orqali (tr: 0=to'liq, 100=ko'rinmas)
-      int  a     = (int)MathRound(255.0 * (100 - tr) / 100.0);
+      uchar a    = (uchar)MathRound(255.0 * (100 - tr) / 100.0);
       uint fillC = ColorToARGB(c, a);   // OBJ_RECTANGLE fill = OBJPROP_COLOR
 
       if(ObjectFind(0, nm) < 0)
