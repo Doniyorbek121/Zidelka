@@ -54,9 +54,9 @@ jobs:
           if (-not (Test-Path $inc)) {
             Write-Host "::warning::Standart Include topilmadi — kompilyatsiya xato berishi mumkin"
           }
-          # o'rnatuvchi tugashi uchun biroz kutamiz, terminalni yopamiz
+          # o'rnatuvchi tugashi uchun biroz kutamiz, terminal/metaeditorni yopamiz
           Start-Sleep -Seconds 20
-          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-Process terminal64,metaeditor64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Write-Host "MetaEditor tayyor: $editor"
 
       - name: Compile sources
@@ -81,14 +81,21 @@ jobs:
           $failed = $false
           foreach ($f in $files) {
             $log = "$f.log"
+            $ex5 = [System.IO.Path]::ChangeExtension($f, ".ex5")
             if (Test-Path $log) { Remove-Item $log -Force }
+            if (Test-Path $ex5) { Remove-Item $ex5 -Force }
 
             Write-Host "==================================================="
             Write-Host "Kompilyatsiya: $f"
 
-            # metaeditor64.exe — GUI ilova, shuning uchun jarayon tugashini
-            # ANIQ kutamiz. ProcessStartInfo.ArgumentList bo'shliqli yo'llarni
-            # to'g'ri (har biri alohida argv sifatida) uzatadi.
+            # MUHIM: metaeditor64.exe — bitta-nusxali (single-instance) ilova.
+            # Agar nusxa allaqachon ishlab tursa, /compile chaqiruvi unga
+            # uzatilib darrov chiqadi va aslida kompilyatsiya qilmaydi. Shuning
+            # uchun har safar avval mavjud nusxani yopamiz.
+            Get-Process metaeditor64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+
+            # ProcessStartInfo.ArgumentList bo'shliqli yo'llarni to'g'ri uzatadi.
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName = $editor
             [void]$psi.ArgumentList.Add("/compile:$f")
@@ -96,25 +103,27 @@ jobs:
             [void]$psi.ArgumentList.Add("/log:$log")
             $psi.UseShellExecute = $false
             $proc = [System.Diagnostics.Process]::Start($psi)
-            if (-not $proc.WaitForExit(120000)) {
-              try { $proc.Kill() } catch {}
-              Write-Host "::error file=$f::Kompilyatsiya vaqti tugadi (timeout)"
-              $failed = $true
-              continue
+
+            # Kompilyatsiya asinxron/GUI-instansiyada bo'lishi mumkin, shuning
+            # uchun jarayonni uzoq bloklamasdan .ex5 paydo bo'lguncha kutamiz.
+            $w = 0
+            while (-not (Test-Path $ex5) -and $w -lt 90) {
+              Start-Sleep -Seconds 3; $w += 3
             }
-            $code = $proc.ExitCode
-            Start-Sleep -Seconds 1
+            Start-Sleep -Seconds 2
+
+            # keyingi fayl uchun toza holat — bu metaeditor nusxasini yopamiz
+            Get-Process metaeditor64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
             if (Test-Path $log) {
-              $content = Get-Content $log -Encoding Unicode
-              $content | ForEach-Object { Write-Host $_ }
-              # metaeditor logi: "... N error(s), M warning(s)"
-              if ($content -match "[1-9]\d*\s+error") {
-                Write-Host "::error file=$f::Kompilyatsiya xatolari topildi"
-                $failed = $true
-              }
+              Get-Content $log -Encoding Unicode | ForEach-Object { Write-Host $_ }
+            }
+
+            if (Test-Path $ex5) {
+              Write-Host "OK: $([System.IO.Path]::GetFileName($ex5)) yaratildi"
             } else {
-              Write-Host "::error file=$f::Kompilyatsiya logi yaratilmadi (exit $code)"
+              $detail = (Test-Path $log) ? "log bor, lekin .ex5 yaratilmadi (xato bo'lishi mumkin)" : "na .ex5, na log yaratildi"
+              Write-Host "::error file=$f::Kompilyatsiya muvaffaqiyatsiz — $detail"
               $failed = $true
             }
           }
