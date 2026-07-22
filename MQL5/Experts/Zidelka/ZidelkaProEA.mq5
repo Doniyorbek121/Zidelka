@@ -1,60 +1,48 @@
 //+------------------------------------------------------------------+
 //|                                                ZidelkaProEA.mq5   |
-//|            Zidelka Pro Signal indikatoriga asoslangan Expert      |
+//|            Zidelka Pro — mustaqil avtomatik savdo roboti (EA)     |
 //|                                                                  |
-//|  Supertrend + EMA + RSI + MTF konfluensiyasi bo'yicha savdo:     |
-//|  risk asosida lot, ATR/Supertrend SL/TP, Supertrend trailing.    |
+//|  Supertrend + EMA + RSI + MTF konfluensiyasi bo'yicha savdo.     |
+//|  MUHIM: EA signalni O'ZI hisoblaydi (iCustom/indikator KERAK     |
+//|  EMAS). Shu sababli 4002 kabi xatolar bo'lmaydi va quyidagi      |
+//|  barcha sozlamalar HAQIQATAN ishlaydi — signal chastotasini       |
+//|  o'zingiz boshqarasiz.                                            |
 //+------------------------------------------------------------------+
 #property copyright "Zidelka"
 #property link      "https://github.com/Doniyorbek121/Zidelka"
-#property version   "1.00"
-#property description "Zidelka Pro Signal asosidagi avtomatik savdo roboti (EA)."
+#property version   "2.00"
+#property description "Mustaqil (iCustomsiz) Supertrend+EMA+RSI+MTF savdo roboti."
 
 #include <Trade/Trade.mqh>
 #include <Trade/PositionInfo.mqh>
 
 //+------------------------------------------------------------------+
-//| Kirish parametrlari — INDIKATOR (iCustom bilan mos bo'lishi shart)|
-//| Bu qiymatlar indikator buferlarini shakllantiradi, shuning uchun |
-//| grafikdagi indikator sozlamalari bilan bir xil bo'lishi kerak.   |
+//| Kirish parametrlari — SIGNAL (endi HAQIQATAN ishlaydi)           |
 //+------------------------------------------------------------------+
-input group "=== Indikator sozlamalari ==="
+input group "=== Signal (Supertrend + filtrlar) ==="
 input int             InpATRPeriod    = 10;        // ATR davri
-input double          InpATRMult      = 3.0;       // ATR koeffitsienti
-input bool            InpUseEMA       = true;      // EMA filtri
+input double          InpATRMult      = 3.0;       // ATR koeff. (kichik = KO'P signal)
+input bool            InpUseEMA       = true;      // EMA trend filtri
 input int             InpEMAPeriod    = 200;       // EMA davri
-input bool            InpUseRSI       = true;      // RSI filtri
+input bool            InpUseRSI       = true;      // RSI impuls filtri
 input int             InpRSIPeriod    = 14;        // RSI davri
-input double          InpRSIBuy       = 50.0;      // RSI BUY darajasi
-input double          InpRSISell      = 50.0;      // RSI SELL darajasi
-input bool            InpUseMTF       = true;      // MTF filtri
+input double          InpRSIBuy       = 50.0;      // RSI BUY minimal darajasi
+input double          InpRSISell      = 50.0;      // RSI SELL maksimal darajasi
+input bool            InpUseMTF       = true;      // MTF (yuqori TF) filtri
 input ENUM_TIMEFRAMES InpHigherTF     = PERIOD_H4; // Yuqori taymfreym
-input int             InpArrowGap     = 15;        // O'q masofasi (pips)
-
-input group "=== Likvidlik zonalari (indikator bilan mos) ==="
-input bool            InpUseFVG       = true;      // Imbalance (FVG) zonalari
-input bool            InpUsePools     = true;      // Stop-pool (swing) zonalari
-input int             InpZonePivotL   = 8;         // Pivot chap
-input int             InpZonePivotR   = 3;         // Pivot o'ng
-input double          InpZoneMinATR   = 0.10;      // Min zona balandligi (ATR)
-input double          InpZonePoolATR  = 0.30;      // Stop-pool balandligi (ATR)
-input int             InpZoneLookback = 500;       // Zona qidirish oralig'i (bar)
-input int             InpMaxZones     = 24;        // Maksimal faol zonalar
-input bool            InpUseLiqFilter = false;     // Signalni zonalar bilan filtrlash
-input double          InpZoneProxATR  = 2.0;       // Zona yaqinligi (ATR)
 
 input group "=== Savdo boshqaruvi ==="
 input long            InpMagic        = 20260720;  // Magic number
 input string          InpComment      = "ZidelkaPro"; // Buyurtma izohi
 input int             InpDeviation    = 20;        // Maksimal slippage (points)
 input int             InpMaxSpread    = 30;        // Maksimal spread (points, 0=cheksiz)
-input bool            InpReverse      = true;      // Qarama-qarshi signalda pozitsiyani teskarilash
-input int             InpMaxPositions = 1;         // Bir vaqtda maks. pozitsiyalar (magic bo'yicha)
+input bool            InpReverse      = true;      // Qarama-qarshi signalda teskarilash
+input int             InpMaxPositions = 1;         // Bir vaqtda maks. pozitsiyalar
 
 input group "=== Risk / Lot ==="
 enum ENUM_LOT_MODE { LOT_FIXED, LOT_RISK_PERCENT };
-input ENUM_LOT_MODE   InpLotMode      = LOT_RISK_PERCENT; // Lot rejimi
-input double          InpFixedLot     = 0.10;      // Fiksatsiyalangan lot
+input ENUM_LOT_MODE   InpLotMode      = LOT_FIXED; // Lot rejimi
+input double          InpFixedLot     = 0.01;      // Fiksatsiyalangan lot
 input double          InpRiskPercent  = 1.0;       // Balansdan risk (%)
 
 input group "=== Stop Loss / Take Profit ==="
@@ -80,54 +68,47 @@ input int             InpEndHour      = 22;        // Tugash soati (server vaqti
 CTrade         trade;
 CPositionInfo  pos;
 
-int      g_handle    = INVALID_HANDLE;
-int      g_atrHandle = INVALID_HANDLE;
+int      g_atrHandle    = INVALID_HANDLE;
+int      g_emaHandle    = INVALID_HANDLE;
+int      g_rsiHandle    = INVALID_HANDLE;
+int      g_atrMtfHandle = INVALID_HANDLE;
+
 datetime g_lastBar   = 0;
 double   g_point     = 0.0;
-
-//--- indikator bufer indekslari
-#define BUF_BUY   2
-#define BUF_SELL  3
-#define BUF_ST    4
-#define BUF_DIR   5
+double   g_stValue   = 0.0;   // oxirgi yopilgan bar Supertrend qiymati (SL/trailing)
+int      g_dirNow    = 0;     // joriy yo'nalish
 
 //+------------------------------------------------------------------+
 //| Init                                                             |
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   //--- Indikator handle'i. MUHIM: iCustom PARAMETRSIZ chaqiriladi.
-   //--- Ba'zi MT5 build'larda iCustom uzatilgan parametrlar sonini indikator
-   //--- inputlari soniga AYNAN mos kelishini talab qiladi; mos kelmasa 4002
-   //--- ("cannot load custom indicator") xatosi chiqadi. Parametrsiz chaqiruv
-   //--- indikatorni STANDART sozlamalari bilan yuklaydi (aynan kerakli sozlama)
-   //--- va hech qanday moslik talab qilinmaydi. EA baribir 2/3/4/5 buferlarni
-   //--- (BUY/SELL/Supertrend/Dir) o'qiydi — ular sozlamaga bog'liq emas.
-   g_handle = iCustom(_Symbol, _Period, "Zidelka\\ZidelkaProSignal");
-
-   if(g_handle == INVALID_HANDLE)
-     {
-      Print("Xato: ZidelkaProSignal indikatorini yuklab bo'lmadi. ",
-            "MQL5/Indicators/Zidelka/ papkasida ekanligini tekshiring.");
-      return(INIT_FAILED);
-     }
-
-   //--- SL uchun doimiy ATR handle'i (SL_ATR rejimida ishlatiladi)
    g_atrHandle = iATR(_Symbol, _Period, InpATRPeriod);
-   if(g_atrHandle == INVALID_HANDLE)
+   if(g_atrHandle == INVALID_HANDLE){ Print("ATR handle xato"); return(INIT_FAILED); }
+
+   if(InpUseEMA)
      {
-      Print("Xato: ATR handle yaratilmadi.");
-      return(INIT_FAILED);
+      g_emaHandle = iMA(_Symbol, _Period, InpEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+      if(g_emaHandle == INVALID_HANDLE){ Print("EMA handle xato"); return(INIT_FAILED); }
+     }
+   if(InpUseRSI)
+     {
+      g_rsiHandle = iRSI(_Symbol, _Period, InpRSIPeriod, PRICE_CLOSE);
+      if(g_rsiHandle == INVALID_HANDLE){ Print("RSI handle xato"); return(INIT_FAILED); }
+     }
+   if(InpUseMTF)
+     {
+      g_atrMtfHandle = iATR(_Symbol, InpHigherTF, InpATRPeriod);
+      if(g_atrMtfHandle == INVALID_HANDLE){ Print("MTF ATR handle xato"); return(INIT_FAILED); }
      }
 
-   //--- CTrade sozlamalari
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpDeviation);
    trade.SetTypeFillingBySymbol(_Symbol);
    trade.SetMarginMode();
 
    g_point = _Point;
-
+   Print("ZidelkaProEA v2.00 ishga tushdi (mustaqil signal, iCustomsiz).");
    return(INIT_SUCCEEDED);
   }
 
@@ -136,8 +117,111 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   if(g_handle    != INVALID_HANDLE) IndicatorRelease(g_handle);
-   if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   if(g_atrHandle    != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   if(g_emaHandle    != INVALID_HANDLE) IndicatorRelease(g_emaHandle);
+   if(g_rsiHandle    != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
+   if(g_atrMtfHandle != INVALID_HANDLE) IndicatorRelease(g_atrMtfHandle);
+  }
+
+//+------------------------------------------------------------------+
+//| Yuqori TF Supertrend yo'nalishi: +1 up, -1 down, 0 noma'lum      |
+//+------------------------------------------------------------------+
+int HigherTFDirection()
+  {
+   double atr[];
+   if(CopyBuffer(g_atrMtfHandle, 0, 0, 3, atr) < 3) return(0);
+   ArraySetAsSeries(atr, false);
+
+   MqlRates r[];
+   if(CopyRates(_Symbol, InpHigherTF, 0, 3, r) < 3) return(0);
+   ArraySetAsSeries(r, false);
+
+   double hl2   = (r[1].high + r[1].low) / 2.0;
+   double upper = hl2 + InpATRMult * atr[1];
+   double lower = hl2 - InpATRMult * atr[1];
+   if(r[1].close > upper) return(+1);
+   if(r[1].close < lower) return(-1);
+   return(r[1].close >= hl2 ? +1 : -1);
+  }
+
+//+------------------------------------------------------------------+
+//| Signalni ICHKI hisoblash (indikatorsiz).                         |
+//| Qaytaradi: +1 BUY flip, -1 SELL flip, 0 signal yo'q.             |
+//| Yon ta'sir: g_stValue va g_dirNow yangilanadi.                   |
+//+------------------------------------------------------------------+
+int ComputeSignal()
+  {
+   int need = MathMax(InpEMAPeriod + 60, 350);
+
+   double atr[], hi[], lo[], cl[], ema[], rsi[];
+   if(CopyBuffer(g_atrHandle, 0, 0, need, atr) != need) return(0);
+   if(CopyHigh (_Symbol, _Period, 0, need, hi) != need) return(0);
+   if(CopyLow  (_Symbol, _Period, 0, need, lo) != need) return(0);
+   if(CopyClose(_Symbol, _Period, 0, need, cl) != need) return(0);
+   ArraySetAsSeries(atr, false); ArraySetAsSeries(hi, false);
+   ArraySetAsSeries(lo,  false); ArraySetAsSeries(cl, false);
+
+   if(InpUseEMA){ if(CopyBuffer(g_emaHandle, 0, 0, need, ema) != need) return(0); ArraySetAsSeries(ema, false); }
+   if(InpUseRSI){ if(CopyBuffer(g_rsiHandle, 0, 0, need, rsi) != need) return(0); ArraySetAsSeries(rsi, false); }
+
+   //--- Supertrend'ni oldinga (chapdan o'ngga) rekursiv hisoblaymiz
+   double stArr[]; ArrayResize(stArr, need);
+   int    dirArr[]; ArrayResize(dirArr, need);
+   stArr[0]  = lo[0];
+   dirArr[0] = +1;
+   for(int i = 1; i < need; i++)
+     {
+      double hl2   = (hi[i] + lo[i]) / 2.0;
+      double up    = hl2 + InpATRMult * atr[i];
+      double dn    = hl2 - InpATRMult * atr[i];
+      double prevSt = stArr[i-1];
+      int    prevD  = dirArr[i-1];
+      if(prevD > 0) dn = MathMax(dn, prevSt);
+      else          up = MathMin(up, prevSt);
+
+      int d = prevD; double s;
+      if(prevD > 0){ if(cl[i] < dn){ d = -1; s = up; } else { d = +1; s = dn; } }
+      else         { if(cl[i] > up){ d = +1; s = dn; } else { d = -1; s = up; } }
+      stArr[i]  = s;
+      dirArr[i] = d;
+     }
+
+   //--- need-1 = shakllanayotgan bar; need-2 = oxirgi YOPILGAN bar
+   int lastClosed = need - 2;
+   int prevClosed = need - 3;
+   g_stValue = stArr[lastClosed];
+   g_dirNow  = dirArr[lastClosed];
+
+   int dLast = dirArr[lastClosed];
+   int dPrev = dirArr[prevClosed];
+   bool flipUp   = (dLast > 0 && dPrev <= 0);
+   bool flipDown = (dLast < 0 && dPrev >= 0);
+   if(!flipUp && !flipDown) return(0);
+
+   int dir = flipUp ? +1 : -1;
+   double price = cl[lastClosed];
+
+   //--- filtrlar
+   if(InpUseEMA)
+     {
+      if(dir > 0 && price < ema[lastClosed]) return(0);
+      if(dir < 0 && price > ema[lastClosed]) return(0);
+     }
+   if(InpUseRSI)
+     {
+      if(dir > 0 && rsi[lastClosed] < InpRSIBuy)  return(0);
+      if(dir < 0 && rsi[lastClosed] > InpRSISell) return(0);
+     }
+   if(InpUseMTF)
+     {
+      int m = HigherTFDirection();
+      if(m != 0)
+        {
+         if(dir > 0 && m < 0) return(0);
+         if(dir < 0 && m > 0) return(0);
+        }
+     }
+   return(dir);
   }
 
 //+------------------------------------------------------------------+
@@ -145,32 +229,22 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   //--- trailing har tikda ishlaydi (agar yoqilgan bo'lsa)
    if(InpUseTrailing)
       ManageTrailing();
 
-   //--- signal faqat yangi bar ochilganda tekshiriladi (bar yopilgach)
+   //--- signal faqat yangi bar ochilganda (bar yopilgach)
    datetime curBar = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
    if(curBar == g_lastBar)
       return;
    g_lastBar = curBar;
 
-   //--- oxirgi YOPILGAN bardagi signalni o'qiymiz (shift = 1)
-   double buy[], sell[];
-   if(CopyBuffer(g_handle, BUF_BUY,  1, 1, buy)  != 1) return;
-   if(CopyBuffer(g_handle, BUF_SELL, 1, 1, sell) != 1) return;
-
-   bool buySignal  = (buy[0]  > 0.0 && buy[0]  != EMPTY_VALUE);
-   bool sellSignal = (sell[0] > 0.0 && sell[0] != EMPTY_VALUE);
-
-   if(!buySignal && !sellSignal)
+   int sig = ComputeSignal();   // +1 buy, -1 sell, 0 yo'q
+   if(sig == 0)
       return;
 
-   //--- vaqt filtri
    if(!TradingHoursOK())
       return;
 
-   //--- spread filtri
    if(InpMaxSpread > 0)
      {
       long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -181,8 +255,7 @@ void OnTick()
         }
      }
 
-   if(buySignal)  ProcessSignal(ORDER_TYPE_BUY);
-   if(sellSignal) ProcessSignal(ORDER_TYPE_SELL);
+   ProcessSignal(sig > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
   }
 
 //+------------------------------------------------------------------+
@@ -190,20 +263,14 @@ void OnTick()
 //+------------------------------------------------------------------+
 void ProcessSignal(ENUM_ORDER_TYPE type)
   {
-   //--- mavjud pozitsiyalarni tekshirish
-   int    same = 0, opposite = 0;
+   int same = 0, opposite = 0;
    CountPositions(type, same, opposite);
 
-   //--- qarama-qarshi pozitsiyani yopish (teskarilash)
    if(opposite > 0)
      {
-      if(InpReverse)
-         CloseAllPositions();
-      else
-         return; // teskari signal, lekin teskarilash o'chirilgan
+      if(InpReverse) CloseAllPositions();
+      else           return;
      }
-
-   //--- allaqachon ochiq bir xil yo'nalishdagi pozitsiya soni cheklovi
    if(same >= InpMaxPositions)
       return;
 
@@ -219,12 +286,8 @@ void OpenTrade(ENUM_ORDER_TYPE type)
                   ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
                   : SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-   double slDist = StopLossDistance(type, price);   // narx birligida
-   if(slDist <= 0)
-     {
-      Print("Xato: SL masofasi noto'g'ri hisoblandi.");
-      return;
-     }
+   double slDist = StopLossDistance(type, price);
+   if(slDist <= 0){ Print("Xato: SL masofasi noto'g'ri."); return; }
 
    double sl, tp;
    if(type == ORDER_TYPE_BUY)
@@ -238,17 +301,11 @@ void OpenTrade(ENUM_ORDER_TYPE type)
       tp = (InpTPratio > 0) ? price - slDist * InpTPratio : 0.0;
      }
 
-   //--- broker minimal masofasini hurmat qilish
    sl = EnforceStops(type, price, sl, true);
-   if(tp != 0.0)
-      tp = EnforceStops(type, price, tp, false);
+   if(tp != 0.0) tp = EnforceStops(type, price, tp, false);
 
    double lot = CalcLot(slDist);
-   if(lot <= 0)
-     {
-      Print("Xato: lot hajmi 0. Riskni yoki balansni tekshiring.");
-      return;
-     }
+   if(lot <= 0){ Print("Xato: lot 0. Risk/balansni tekshiring."); return; }
 
    bool ok = (type == ORDER_TYPE_BUY)
              ? trade.Buy(lot, _Symbol, 0.0, sl, tp, InpComment)
@@ -265,7 +322,7 @@ void OpenTrade(ENUM_ORDER_TYPE type)
   }
 
 //+------------------------------------------------------------------+
-//| SL masofasini narx birligida hisoblash                           |
+//| SL masofasi (narx birligida)                                     |
 //+------------------------------------------------------------------+
 double StopLossDistance(ENUM_ORDER_TYPE type, double price)
   {
@@ -284,44 +341,38 @@ double StopLossDistance(ENUM_ORDER_TYPE type, double price)
 
       case SL_SUPERTREND:
         {
-         double st[];
-         if(CopyBuffer(g_handle, BUF_ST, 1, 1, st) != 1 || st[0] <= 0.0)
+         if(g_stValue <= 0.0)
             return(InpSLfixed * g_point);
-         double dist = MathAbs(price - st[0]) + InpTrailBufferPts * g_point;
-         return(dist);
+         return(MathAbs(price - g_stValue) + InpTrailBufferPts * g_point);
         }
      }
    return(InpSLfixed * g_point);
   }
 
 //+------------------------------------------------------------------+
-//| Lot hajmini hisoblash                                            |
+//| Lot hisoblash                                                    |
 //+------------------------------------------------------------------+
 double CalcLot(double slDist)
   {
    if(InpLotMode == LOT_FIXED)
       return(NormalizeLot(InpFixedLot));
 
-   //--- risk asosida
    double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
    double riskMoney = balance * InpRiskPercent / 100.0;
-
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tickSize <= 0 || tickValue <= 0)
       return(NormalizeLot(InpFixedLot));
 
-   //--- 1 lot uchun SL masofasidagi zarar
    double lossPerLot = (slDist / tickSize) * tickValue;
    if(lossPerLot <= 0)
       return(NormalizeLot(InpFixedLot));
 
-   double lot = riskMoney / lossPerLot;
-   return(NormalizeLot(lot));
+   return(NormalizeLot(riskMoney / lossPerLot));
   }
 
 //+------------------------------------------------------------------+
-//| Lotni broker qadamiga moslashtirish                              |
+//| Lotni broker qadamiga moslash                                    |
 //+------------------------------------------------------------------+
 double NormalizeLot(double lot)
   {
@@ -329,7 +380,6 @@ double NormalizeLot(double lot)
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(step <= 0) step = 0.01;
-
    lot = MathFloor(lot / step) * step;
    lot = MathMax(minLot, MathMin(maxLot, lot));
    return(NormalizeDouble(lot, 2));
@@ -346,13 +396,12 @@ double EnforceStops(ENUM_ORDER_TYPE type, double price, double level, bool isSL)
       return(NormalizeDouble(level, _Digits));
 
    bool buy = (type == ORDER_TYPE_BUY);
-   //--- SL uchun: narxdan yetarlicha uzoq bo'lishi kerak
    if(isSL)
      {
       if(buy  && (price - level) < minDist) level = price - minDist;
       if(!buy && (level - price) < minDist) level = price + minDist;
      }
-   else //--- TP
+   else
      {
       if(buy  && (level - price) < minDist) level = price + minDist;
       if(!buy && (price - level) < minDist) level = price - minDist;
@@ -365,10 +414,7 @@ double EnforceStops(ENUM_ORDER_TYPE type, double price, double level, bool isSL)
 //+------------------------------------------------------------------+
 void ManageTrailing()
   {
-   double st[];
-   if(CopyBuffer(g_handle, BUF_ST, 1, 1, st) != 1 || st[0] <= 0.0)
-      return;
-
+   if(g_stValue <= 0.0) return;
    double buffer = InpTrailBufferPts * g_point;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -382,10 +428,8 @@ void ManageTrailing()
       if(pos.PositionType() == POSITION_TYPE_BUY)
         {
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         //--- yetarli foyda bormi?
          if(bid - openPrice < InpTrailStartPts * g_point) continue;
-         double newSL = st[0] - buffer;
-         //--- faqat yuqoriga siljitamiz va narxdan pastda bo'lishi kerak
+         double newSL = g_stValue - buffer;
          if(newSL > curSL && newSL < bid)
            {
             newSL = EnforceStops(ORDER_TYPE_BUY, bid, newSL, true);
@@ -397,7 +441,7 @@ void ManageTrailing()
         {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
          if(openPrice - ask < InpTrailStartPts * g_point) continue;
-         double newSL = st[0] + buffer;
+         double newSL = g_stValue + buffer;
          if((curSL == 0.0 || newSL < curSL) && newSL > ask)
            {
             newSL = EnforceStops(ORDER_TYPE_SELL, ask, newSL, true);
@@ -409,13 +453,12 @@ void ManageTrailing()
   }
 
 //+------------------------------------------------------------------+
-//| Pozitsiyalarni sanash (magic + symbol bo'yicha)                  |
+//| Pozitsiyalarni sanash (magic + symbol)                           |
 //+------------------------------------------------------------------+
 void CountPositions(ENUM_ORDER_TYPE signalType, int &same, int &opposite)
   {
    same = 0; opposite = 0;
    ENUM_POSITION_TYPE sigPos = (signalType == ORDER_TYPE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
-
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(!pos.SelectByIndex(i)) continue;
@@ -426,7 +469,7 @@ void CountPositions(ENUM_ORDER_TYPE signalType, int &same, int &opposite)
   }
 
 //+------------------------------------------------------------------+
-//| Ushbu symbol/magic bo'yicha barcha pozitsiyalarni yopish         |
+//| Symbol/magic bo'yicha barcha pozitsiyalarni yopish               |
 //+------------------------------------------------------------------+
 void CloseAllPositions()
   {
@@ -449,7 +492,6 @@ bool TradingHoursOK()
    int h = t.hour;
    if(InpStartHour <= InpEndHour)
       return(h >= InpStartHour && h < InpEndHour);
-   //--- kechasi orqali o'tuvchi oraliq (masalan 22 -> 6)
    return(h >= InpStartHour || h < InpEndHour);
   }
 //+------------------------------------------------------------------+
